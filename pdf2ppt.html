@@ -131,7 +131,7 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
 <body>
 
 <h1>PDF → PowerPoint 変換</h1>
-<p class="subtitle">ブラウザ完結 / ファイルはサーバーに送信されません（初回OCR時のみ言語データを取得）</p>
+<p class="subtitle">ブラウザ完結 / ファイルはサーバーに送信されません（初回OCR時のみモデルデータを取得）</p>
 
 <div id="drop-zone">
   <span class="icon">📄</span>
@@ -156,7 +156,7 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
 </div>
 
 <div class="warn-box" id="warn-box">
-  ⏳ Tesseract.js 日本語言語データを取得中... 初回のみ数十秒かかります。
+  ⏳ PaddleOCR モデルを読み込み中... 初回のみ数十秒かかります。
 </div>
 
 <div class="progress-wrap" id="progress-wrap">
@@ -194,9 +194,6 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
 <script src="lib/pptxgen.bundle.js"
         onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';document.head.appendChild(s)"></script>
 
-<!-- Tesseract.js: 日本語OCR対応 -->
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-
 <script>
 "use strict";
 
@@ -207,7 +204,6 @@ const BLOCK_GAP           = 10;
 const MIN_BLOCK_AREA      = 50;
 const TEXT_PAD_RATIO      = 0.15;
 const BG_MARGIN           = 8;
-const MAX_LINE_HEIGHT     = 300;  // 日本語大見出しを考慮し大きめに
 
 const FONT_SIZES = [6,7,8,9,10,10.5,11,12,14,16,18,20,
                     24,28,32,36,40,44,48,54,60,66,72,80,88,96];
@@ -440,115 +436,67 @@ function extractBlocks(canvas, scale, useTransparent) {
   return results;
 }
 
-// ─── テキスト行検出（修正済み）──────────────────────────────────────────────
-// バグ修正: 日本語文字は縦横比が正方形に近いため "w < h" の除外条件を廃止
-function detectLinesInBlock(data, bx0, by0, bx1, by1, W) {
-  const rowHas = [];
-  for (let y = by0; y < by1; y++) {
-    let has = false;
-    for (let x = bx0; x < bx1; x++) {
-      const i = (y*W+x)*4;
-      if (data[i] <= NON_WHITE_THR || data[i+1] <= NON_WHITE_THR || data[i+2] <= NON_WHITE_THR) {
-        has = true; break;
-      }
-    }
-    rowHas.push(has ? 1 : 0);
-  }
-  const segs = findSegments(rowHas, 3);
-  const lines = [];
-  for (const [s, e] of segs) {
-    const ly0 = by0+s, ly1 = by0+e+1;
-    let lx0 = bx1, lx1 = bx0;
-    for (let y = ly0; y < ly1; y++)
-      for (let x = bx0; x < bx1; x++) {
-        const i = (y*W+x)*4;
-        if (data[i] <= NON_WHITE_THR || data[i+1] <= NON_WHITE_THR || data[i+2] <= NON_WHITE_THR) {
-          if (x < lx0) lx0 = x;
-          if (x > lx1) lx1 = x;
-        }
-      }
-    if (lx0 > lx1) continue;
-    lines.push({ x0: lx0, y0: ly0, x1: lx1+1, y1: ly1 });
-  }
-  return lines;
-}
+// ─── PaddleOCR 初期化 ────────────────────────────────────────────────────────
+let ocrModel = null;
 
-// ─── テキスト行らしさフィルタ（修正済み）────────────────────────────────────
-// バグ修正: "w < h" を廃止 → 日本語文字（ほぼ正方形）も対象に含める
-// 代わりに最小幅フィルタ（最低2文字分）で誤検出を抑制
-function isLikelyTextLine(data, x0, y0, x1, y1, W) {
-  const h = y1 - y0, w = x1 - x0;
-  if (h < 8 || h > MAX_LINE_HEIGHT) return false;
-  // 最低限の幅: 1文字（h）以上あれば対象（縦書きや単文字にも対応）
-  if (w < Math.max(4, h * 0.4)) return false;
-  let nonWhite = 0;
-  for (let y = y0; y < y1; y++)
-    for (let x = x0; x < x1; x++) {
-      const i = (y*W+x)*4;
-      if (data[i] <= NON_WHITE_THR || data[i+1] <= NON_WHITE_THR || data[i+2] <= NON_WHITE_THR)
-        nonWhite++;
-    }
-  const ratio = nonWhite / (h * w);
-  // 日本語文字は密度が高めのため上限を引き上げ 0.80
-  return ratio > 0.02 && ratio < 0.80;
-}
-
-// ─── Tesseract.js 日本語OCR ──────────────────────────────────────────────────
-let tesseractWorker = null;
-
-async function initTesseract() {
-  if (tesseractWorker) return tesseractWorker;
-  log('Tesseract.js 日本語モデル読み込み中 (初回のみ数十秒かかります)...', 'info');
+async function initPaddleOcr() {
+  if (ocrModel) return true;
   document.getElementById('warn-box').style.display = 'block';
   try {
-    // Tesseract.js v5 API
-    const worker = await Tesseract.createWorker('jpn+eng', 1, {
-      logger: m => {
-        if (m.status === 'loading tesseract core') log('  Tesseract コア読み込み中...', 'info');
-        if (m.status === 'loading language traineddata') log('  日本語データ読み込み中...', 'info');
-        if (m.status === 'initialized api') log('  OCR 初期化完了', 'info');
-      },
-      // CDNからトレーニングデータを取得（初回のみ、以降はブラウザキャッシュ）
-      langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
-    });
-    // 日本語テキスト認識に適したパラメータ設定
-    await worker.setParameters({
-      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE, // 1行ずつ認識
-      preserve_interword_spaces: '0',
-    });
-    tesseractWorker = worker;
+    log('PaddleOCR モデル読み込み中 (初回のみ数十秒かかります)...', 'info');
+    const mod = await import('https://esm.sh/@paddle-js-models/ocr');
+    const OCRClass = mod.OCR ?? mod.default?.OCR ?? mod.default;
+    if (typeof OCRClass !== 'function') throw new Error('OCR クラスが見つかりません');
+    ocrModel = new OCRClass();
+    await ocrModel.init();
     document.getElementById('warn-box').style.display = 'none';
-    log('OCR 準備完了（Tesseract.js jpn+eng）', 'info');
-    return worker;
+    log('PaddleOCR 初期化完了', 'info');
+    return true;
   } catch(e) {
     document.getElementById('warn-box').style.display = 'none';
-    log(`[WARN] Tesseract 初期化失敗: ${e.message}`, 'err');
-    return null;
+    log(`[WARN] PaddleOCR 利用不可: ${e.message}`, 'warn');
+    ocrModel = null;
+    return false;
   }
 }
 
-async function ocrLineCanvas(worker, srcCanvas, x0, y0, x1, y1) {
-  const w = x1 - x0, h = y1 - y0;
-  if (w <= 0 || h <= 0) return '';
-  // 認識精度向上: 小さい行は拡大してOCRにかける
-  const SCALE = Math.max(1, Math.ceil(48 / h)); // 最低48px高さ
-  const off = document.createElement('canvas');
-  off.width  = w * SCALE;
-  off.height = h * SCALE;
-  const ctx = off.getContext('2d');
-  // 白背景で塗りつぶし（透明ピクセル対策）
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, off.width, off.height);
-  ctx.drawImage(srcCanvas, x0, y0, w, h, 0, 0, off.width, off.height);
-  try {
-    const result = await worker.recognize(off);
-    // 改行・余分スペースをトリム
-    return result.data.text.replace(/\n/g, '').trim();
-  } catch {
-    return '';
+// ─── PaddleOCR 結果処理（4点ポリゴン → 軸平行 bbox）────────────────────────
+function processOcrResults(items, scale, origData, W, H) {
+  // PaddleOCR は items 配列または { text: [...] } を返す
+  const arr = Array.isArray(items) ? items : (items?.text ?? []);
+  const results = [];
+  for (const item of arr) {
+    if (!item.text?.trim()) continue;
+    if (item.score != null && item.score < 0.5) continue;
+    const box = item.box;
+    if (!box) continue;
+    // box は [[x,y],[x,y],[x,y],[x,y]] または [x,y,x,y,...] のどちらか
+    let pts;
+    if (Array.isArray(box[0])) {
+      pts = box;
+    } else {
+      // フラット配列 [x0,y0,x1,y1,...] を [[x,y],...] に変換
+      pts = [];
+      for (let j = 0; j < box.length; j += 2) pts.push([box[j], box[j+1]]);
+    }
+    const xs = pts.map(p => p[0]);
+    const ys = pts.map(p => p[1]);
+    const x0_px = Math.max(0, Math.min(...xs));
+    const y0_px = Math.max(0, Math.min(...ys));
+    const x1_px = Math.min(W, Math.max(...xs));
+    const y1_px = Math.min(H, Math.max(...ys));
+    if (x1_px <= x0_px || y1_px <= y0_px) continue;
+    results.push({
+      text:       item.text.trim(),
+      score:      item.score ?? 1,
+      font_size:  snapFontSize((y1_px - y0_px) / scale),
+      font_color: getTextColor(origData, x0_px, y0_px, x1_px, y1_px, W),
+      x0_px, y0_px, x1_px, y1_px,
+      x0: x0_px / scale, y0: y0_px / scale,
+      x1: x1_px / scale, y1: y1_px / scale,
+    });
   }
+  return results;
 }
 
 // ─── PDF内蔵テキスト抽出 ─────────────────────────────────────────────────────
@@ -640,12 +588,12 @@ async function processPDF(file) {
   const totalPages = pdf.numPages;
   log(`総ページ数: ${totalPages}`);
 
-  // ─ Tesseract 初期化 ─
-  let ocrWorker = null;
+  // ─ PaddleOCR 初期化 ─
+  let ocrReady = false;
   if (ocrEnabled) {
-    ocrWorker = await initTesseract();
-    if (!ocrWorker) {
-      log('[WARN] OCR 無効化してスキップします', 'warn');
+    ocrReady = await initPaddleOcr();
+    if (!ocrReady) {
+      log('[WARN] PaddleOCR 利用不可のため OCR をスキップします', 'warn');
     }
   }
 
@@ -701,46 +649,20 @@ async function processPDF(file) {
       }
     }
 
-    // 方法2: OCR（内蔵テキストがない場合、またはOCRが有効な場合）
-    const MAX_OCR_REGIONS = 80;
-    if (ocrWorker && (textRows.length === 0 || ocrEnabled)) {
-      const imgData = ctx.getImageData(0, 0, W, H);
-      const data    = imgData.data;
-
-      // PDF内蔵テキストで既に取れた行はOCRをスキップ
-      const skipOcr = textRows.length > 0;
-      if (!skipOcr) {
-        const blocks = detectBlocks(data, W, H);
-        const allLines = [];
-        for (const [bx0, by0, bx1, by1] of blocks)
-          for (const ln of detectLinesInBlock(data, bx0, by0, bx1, by1, W))
-            if (isLikelyTextLine(data, ln.x0, ln.y0, ln.x1, ln.y1, W))
-              allLines.push(ln);
-
-        const ocrCount = Math.min(allLines.length, MAX_OCR_REGIONS);
-        if (allLines.length > MAX_OCR_REGIONS)
-          log(`  OCR 実行中 (${allLines.length} 行 → 上位 ${MAX_OCR_REGIONS} 行)...`);
-        else
-          log(`  OCR 実行中 (${allLines.length} 行)...`);
-
-        for (let li = 0; li < ocrCount; li++) {
-          const ln = allLines[li];
-          const text = await ocrLineCanvas(ocrWorker, canvas, ln.x0, ln.y0, ln.x1, ln.y1);
-          if (!text) continue;
-          const color    = getTextColor(data, ln.x0, ln.y0, ln.x1, ln.y1, W);
-          const fontSize = snapFontSize((ln.y1 - ln.y0) / scale);
-          textRows.push({
-            text,
-            font_size:  fontSize,
-            font_color: color,
-            x0_px: ln.x0, y0_px: ln.y0, x1_px: ln.x1, y1_px: ln.y1,
-            x0: ln.x0 / scale, y0: ln.y0 / scale,
-            x1: ln.x1 / scale, y1: ln.y1 / scale,
-          });
-        }
-      } else {
-        log('  PDF内蔵テキストを使用 (OCRスキップ)', 'info');
+    // 方法2: PaddleOCR（内蔵テキストがない場合）
+    if (ocrReady && ocrModel && textRows.length === 0) {
+      log('  PaddleOCR 実行中 (フルページ)...', 'info');
+      try {
+        const origImgData = ctx.getImageData(0, 0, W, H);
+        const result = await ocrModel.recognize(canvas);
+        const ocrRows = processOcrResults(result, scale, origImgData.data, W, H);
+        log(`  PaddleOCR: ${ocrRows.length} 行検出`);
+        textRows = ocrRows;
+      } catch(e) {
+        log(`  [WARN] PaddleOCR 認識失敗: ${e.message}`, 'warn');
       }
+    } else if (textRows.length > 0) {
+      log('  PDF内蔵テキストを使用 (OCRスキップ)', 'info');
     }
 
     log(`  テキスト確定: ${textRows.length} 行`);
