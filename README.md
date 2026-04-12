@@ -25,6 +25,7 @@ PDF を PowerPoint (PPTX) に変換するブラウザ完結ツールです。
 
 ```
 pdf2ppt.html          ← メインファイル
+sw.js                 ← Service Worker（PaddleOCR オフラインキャッシュ）
 download_libs.bat     ← ライブラリダウンロード（要: Windows 10 1803 以降）
 lib/
   pdf.min.js          ← PDF.js 3.11.174
@@ -32,8 +33,24 @@ lib/
   pptxgen.bundle.js   ← PptxGenJS 3.12.0
 ```
 
-> **注意:** PaddleOCR モデルは初回使用時のみ CDN（esm.sh）から読み込まれます。  
-> 完全オフライン環境での OCR は利用できません。
+### PaddleOCR のオフライン動作について
+
+PaddleOCR のモジュールとモデルファイルは **Service Worker** によってブラウザに自動キャッシュされます。
+
+| 状況 | 動作 |
+|------|------|
+| 初回アクセス（オンライン） | CDN からモデルを取得し、ブラウザに保存 |
+| 2 回目以降 | キャッシュから読み込み → 完全オフライン動作 |
+
+> **注意:** Service Worker は `http://` または `https://` でアクセスした場合のみ有効です。  
+> `file://` で直接開いた場合は常にオンライン取得になります。  
+> ローカルでオフラインキャッシュを有効にするには、簡易 HTTP サーバーをご利用ください:
+>
+> ```
+> python -m http.server 8000
+> ```
+>
+> その後 `http://localhost:8000/pdf2ppt.html` にアクセスしてください。
 
 ### 操作方法
 
