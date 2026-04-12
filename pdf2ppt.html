@@ -170,29 +170,11 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
   <button id="btn-download">⬇ PPTXをダウンロード</button>
 </div>
 
-<!-- ライブラリ: lib/ フォルダに配置、またはCDN版を使用 -->
-<script>
-// pdf.js: ローカル優先、なければCDN
-(function() {
-  var s = document.createElement('script');
-  // ローカル lib/ に pdf.min.js があればそちらを使う
-  s.src = 'lib/pdf.min.js';
-  s.onerror = function() {
-    var s2 = document.createElement('script');
-    s2.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-    s2.onload = function() {
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    };
-    document.head.appendChild(s2);
-  };
-  document.head.appendChild(s);
-})();
-</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
-        onerror="/* local lib loaded */"></script>
+<!-- ライブラリ: lib/ にある場合はローカル優先、なければ CDN -->
+<script src="lib/pdf.min.js"
+  onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';s.onload=function(){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';};document.head.appendChild(s);"></script>
 <script src="lib/pptxgen.bundle.js"
-        onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';document.head.appendChild(s)"></script>
+  onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';document.head.appendChild(s);"></script>
 
 <script>
 "use strict";
@@ -219,6 +201,7 @@ function medianChannel(arr) {
   return s[Math.floor(s.length / 2)];
 }
 function pixelsInRect(data, x0, y0, x1, y1, W) {
+  x0 = x0 | 0; y0 = y0 | 0; x1 = x1 | 0; y1 = y1 | 0;
   const px = [];
   for (let y = y0; y < y1; y++)
     for (let x = x0; x < x1; x++) {
@@ -273,17 +256,15 @@ function sampleBgColor(data, x0, y0, x1, y1, W, H) {
 function maskText(ctx, origData, rows, W, H) {
   if (rows.length === 0) return;
   const pads = rows.map(r => Math.max(1, Math.round((r.y1_px - r.y0_px) * TEXT_PAD_RATIO)));
-  const imgData = ctx.getImageData(0, 0, W, H);
-  const data = imgData.data;
+  const data = new Uint8ClampedArray(origData);  // origData を複製して加工（元データ保持）
 
   for (let ri = 0; ri < rows.length; ri++) {
     const row = rows[ri];
     const p = pads[ri];
-    const x0 = clamp(row.x0_px - p, 0, W);
-    const y0 = clamp(row.y0_px - p, 0, H);
-    const x1 = clamp(row.x1_px + p, 0, W);
-    const y1 = clamp(row.y1_px + p, 0, H);
-    // 周辺ピクセルから背景色を推定してテキスト領域を塗りつぶす
+    const x0 = clamp(row.x0_px - p, 0, W) | 0;
+    const y0 = clamp(row.y0_px - p, 0, H) | 0;
+    const x1 = clamp(row.x1_px + p, 0, W) | 0;
+    const y1 = clamp(row.y1_px + p, 0, H) | 0;
     const [br, bg, bb] = sampleBgColor(origData, x0, y0, x1, y1, W, H);
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
@@ -295,7 +276,7 @@ function maskText(ctx, origData, rows, W, H) {
       }
     }
   }
-  ctx.putImageData(imgData, 0, 0);
+  ctx.putImageData(new ImageData(data, W, H), 0, 0);
 }
 
 // ─── 画像ブロック検出 ────────────────────────────────────────────────────────
@@ -481,10 +462,10 @@ function processOcrResults(items, scale, origData, W, H) {
     }
     const xs = pts.map(p => p[0]);
     const ys = pts.map(p => p[1]);
-    const x0_px = Math.max(0, Math.min(...xs));
-    const y0_px = Math.max(0, Math.min(...ys));
-    const x1_px = Math.min(W, Math.max(...xs));
-    const y1_px = Math.min(H, Math.max(...ys));
+    const x0_px = Math.max(0, Math.floor(Math.min(...xs)));
+    const y0_px = Math.max(0, Math.floor(Math.min(...ys)));
+    const x1_px = Math.min(W, Math.ceil(Math.max(...xs)));
+    const y1_px = Math.min(H, Math.ceil(Math.max(...ys)));
     if (x1_px <= x0_px || y1_px <= y0_px) continue;
     results.push({
       text:       item.text.trim(),
@@ -618,6 +599,7 @@ async function processPDF(file) {
     const ctx = canvas.getContext('2d');
     await page.render({ canvasContext: ctx, viewport }).promise;
     const W = canvas.width, H = canvas.height;
+    const origData = ctx.getImageData(0, 0, W, H);  // 元画像を一度だけ取得
     log(`  ラスタライズ: ${W}×${H}px  scale=${scale.toFixed(3)}`);
 
     if (!layoutDefined) {
@@ -635,10 +617,8 @@ async function processPDF(file) {
       const nativeRows = await extractPdfNativeText(page, scale);
       if (nativeRows.length > 0) {
         log(`  PDF内蔵テキスト: ${nativeRows.length} 行検出`);
-        // フォントカラーはラスタ画像から推定
-        const imgData = ctx.getImageData(0, 0, W, H);
         for (const row of nativeRows) {
-          const color = getTextColor(imgData.data,
+          const color = getTextColor(origData.data,
             clamp(Math.round(row.x0_px), 0, W-1),
             clamp(Math.round(row.y0_px), 0, H-1),
             clamp(Math.round(row.x1_px), 0, W),
@@ -653,9 +633,8 @@ async function processPDF(file) {
     if (ocrReady && ocrModel && textRows.length === 0) {
       log('  PaddleOCR 実行中 (フルページ)...', 'info');
       try {
-        const origImgData = ctx.getImageData(0, 0, W, H);
         const result = await ocrModel.recognize(canvas);
-        const ocrRows = processOcrResults(result, scale, origImgData.data, W, H);
+        const ocrRows = processOcrResults(result, scale, origData.data, W, H);
         log(`  PaddleOCR: ${ocrRows.length} 行検出`);
         textRows = ocrRows;
       } catch(e) {
@@ -669,12 +648,10 @@ async function processPDF(file) {
 
     // ─ テキスト領域をマスク（背景塗りつぶし）─
     if (textRows.length > 0) {
-      const imgDataOrig = ctx.getImageData(0, 0, W, H);
-      // textRowsのピクセル座標が確保されているか確認
       const rowsWithPx = textRows.filter(r =>
         r.x0_px !== undefined && r.y0_px !== undefined);
       if (rowsWithPx.length > 0) {
-        maskText(ctx, imgDataOrig.data, rowsWithPx, W, H);
+        maskText(ctx, origData.data, rowsWithPx, W, H);
       }
     }
 
@@ -726,8 +703,7 @@ async function processPDF(file) {
 // PDF.js workerSrc: ローカルがあれば使い、なければCDN
 window.addEventListener('load', () => {
   if (typeof pdfjsLib !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
   }
 });
 
