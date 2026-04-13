@@ -1,9 +1,14 @@
 'use strict';
 
-const CACHE_NAME = 'pdf2ppt-ocr-v2';
+const CACHE_NAME = 'pdf2ppt-ocr-v3';
 
-// Tesseract.js ワーカー/WASM(unpkg.com/tesseract)と言語データ(tessdata.projectnaptha.com)をキャッシュ対象とする
-const CACHE_ORIGINS = ['unpkg.com/tesseract', 'tessdata.projectnaptha.com'];
+// Transformers.js 本体(cdn.jsdelivr.net/@xenova)と
+// TrOCR モデルファイル(huggingface.co/Xenova)をキャッシュ対象とする
+const CACHE_ORIGINS = [
+  'cdn.jsdelivr.net/npm/@xenova/transformers',
+  'huggingface.co/Xenova',
+  'huggingface.co/datasets/Xenova'
+];
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
