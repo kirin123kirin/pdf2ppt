@@ -170,8 +170,6 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
   <button id="btn-download">⬇ PPTXをダウンロード</button>
 </div>
 
-<!-- Service Worker: OCR モデルをオフラインキャッシュ（http:// 環境のみ有効） -->
-<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function(){});</script>
 
 <!-- ライブラリ: lib/ にある場合はローカル優先、なければ CDN -->
 <script src="lib/pdf.min.js"
