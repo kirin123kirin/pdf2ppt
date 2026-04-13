@@ -1,9 +1,9 @@
 'use strict';
 
-const CACHE_NAME = 'pdf2ppt-ocr-v1';
+const CACHE_NAME = 'pdf2ppt-ocr-v2';
 
-// PaddleOCR モジュール(esm.sh)とモデルファイル(bj.bcebos.com)をキャッシュ対象とする
-const CACHE_ORIGINS = ['esm.sh', 'bj.bcebos.com'];
+// Tesseract.js ワーカー/WASM(unpkg.com/tesseract)と言語データ(tessdata.projectnaptha.com)をキャッシュ対象とする
+const CACHE_ORIGINS = ['unpkg.com/tesseract', 'tessdata.projectnaptha.com'];
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
