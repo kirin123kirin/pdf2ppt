@@ -131,7 +131,7 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
 <body>
 
 <h1>PDF → PowerPoint 変換</h1>
-<p class="subtitle">ブラウザ完結 / ファイルはサーバーに送信されません（初回OCR時のみモデルデータを取得）</p>
+<p class="subtitle">ブラウザ完結 / サーバー送信なし / OCRモデルは初回のみ取得・以降はオフライン動作</p>
 
 <div id="drop-zone">
   <span class="icon">📄</span>
@@ -156,7 +156,7 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
 </div>
 
 <div class="warn-box" id="warn-box">
-  ⏳ PaddleOCR モデルを読み込み中... 初回のみ数十秒かかります。
+  ⏳ OCR モデルを読み込み中... 初回のみ数十秒かかります。
 </div>
 
 <div class="progress-wrap" id="progress-wrap">
@@ -170,11 +170,16 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
   <button id="btn-download">⬇ PPTXをダウンロード</button>
 </div>
 
+<!-- Service Worker: OCR モデルをオフラインキャッシュ（http:// 環境のみ有効） -->
+<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function(){});</script>
+
 <!-- ライブラリ: lib/ にある場合はローカル優先、なければ CDN -->
 <script src="lib/pdf.min.js"
   onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';s.onload=function(){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';};document.head.appendChild(s);"></script>
 <script src="lib/pptxgen.bundle.js"
   onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';document.head.appendChild(s);"></script>
+<script src="lib/tesseract.min.js"
+  onerror="var s=document.createElement('script');s.src='https://unpkg.com/tesseract.js@5/dist/tesseract.min.js';document.head.appendChild(s);"></script>
 
 <script>
 "use strict";
@@ -417,26 +422,45 @@ function extractBlocks(canvas, scale, useTransparent) {
   return results;
 }
 
-// ─── PaddleOCR 初期化 ────────────────────────────────────────────────────────
-let ocrModel = null;
+// ─── Tesseract OCR 初期化 ─────────────────────────────────────────────────────
+let ocrWorker = null;
 
 async function initPaddleOcr() {
-  if (ocrModel) return true;
+  if (ocrWorker) return true;
   document.getElementById('warn-box').style.display = 'block';
   try {
-    log('PaddleOCR モデル読み込み中 (初回のみ数十秒かかります)...', 'info');
-    const mod = await import('https://esm.sh/@paddle-js-models/ocr');
-    const OCRClass = mod.OCR ?? mod.default?.OCR ?? mod.default;
-    if (typeof OCRClass !== 'function') throw new Error('OCR クラスが見つかりません');
-    ocrModel = new OCRClass();
-    await ocrModel.init();
+    // Service Worker キャッシュ済みか確認してログに表示
+    const swActive = navigator.serviceWorker?.controller != null;
+    const cached = swActive && await caches.has('pdf2ppt-ocr-v1').catch(() => false);
+    if (cached) {
+      log('OCR モデル読み込み中 (キャッシュ済み)...', 'info');
+    } else {
+      log('OCR モデル読み込み中 (初回のみ数十秒かかります)...', 'info');
+    }
+    if (typeof Tesseract === 'undefined') throw new Error('Tesseract.js が読み込まれていません');
+
+    // lib/ にローカルファイルがあれば使用、なければ CDN デフォルト
+    let workerOpts = { logger: () => {} };
+    try {
+      const r = await fetch('lib/tesseract.worker.min.js', { method: 'HEAD' });
+      if (r.ok) {
+        workerOpts = {
+          workerPath: 'lib/tesseract.worker.min.js',
+          corePath:   'lib/tesseract-core-lstm.wasm.js',
+          langPath:   'lib/tessdata',
+          logger: () => {}
+        };
+      }
+    } catch(e) {}  // lib/ 未存在または fetch 制限 → CDN デフォルト使用
+
+    ocrWorker = await Tesseract.createWorker('jpn+eng', 1, workerOpts);
     document.getElementById('warn-box').style.display = 'none';
-    log('PaddleOCR 初期化完了', 'info');
+    log('OCR 初期化完了', 'info');
     return true;
   } catch(e) {
     document.getElementById('warn-box').style.display = 'none';
-    log(`[WARN] PaddleOCR 利用不可: ${e.message}`, 'warn');
-    ocrModel = null;
+    log(`[WARN] OCR 利用不可: ${e.message}`, 'warn');
+    ocrWorker = null;
     return false;
   }
 }
@@ -569,12 +593,12 @@ async function processPDF(file) {
   const totalPages = pdf.numPages;
   log(`総ページ数: ${totalPages}`);
 
-  // ─ PaddleOCR 初期化 ─
+  // ─ OCR 初期化 ─
   let ocrReady = false;
   if (ocrEnabled) {
     ocrReady = await initPaddleOcr();
     if (!ocrReady) {
-      log('[WARN] PaddleOCR 利用不可のため OCR をスキップします', 'warn');
+      log('[WARN] OCR 利用不可のため OCR をスキップします', 'warn');
     }
   }
 
@@ -629,16 +653,24 @@ async function processPDF(file) {
       }
     }
 
-    // 方法2: PaddleOCR（内蔵テキストがない場合）
-    if (ocrReady && ocrModel && textRows.length === 0) {
-      log('  PaddleOCR 実行中 (フルページ)...', 'info');
+    // 方法2: Tesseract OCR（内蔵テキストがない場合）
+    if (ocrReady && ocrWorker && textRows.length === 0) {
+      log('  OCR 実行中 (フルページ)...', 'info');
       try {
-        const result = await ocrModel.recognize(canvas);
-        const ocrRows = processOcrResults(result, scale, origData.data, W, H);
-        log(`  PaddleOCR: ${ocrRows.length} 行検出`);
+        const { data } = await ocrWorker.recognize(canvas);
+        const items = data.lines
+          .filter(l => l.confidence > 50 && l.text.trim())
+          .map(l => ({
+            text: l.text.trim(),
+            score: l.confidence / 100,
+            box: [[l.bbox.x0, l.bbox.y0], [l.bbox.x1, l.bbox.y0],
+                  [l.bbox.x1, l.bbox.y1], [l.bbox.x0, l.bbox.y1]]
+          }));
+        const ocrRows = processOcrResults(items, scale, origData.data, W, H);
+        log(`  OCR: ${ocrRows.length} 行検出`);
         textRows = ocrRows;
       } catch(e) {
-        log(`  [WARN] PaddleOCR 認識失敗: ${e.message}`, 'warn');
+        log(`  [WARN] OCR 認識失敗: ${e.message}`, 'warn');
       }
     } else if (textRows.length > 0) {
       log('  PDF内蔵テキストを使用 (OCRスキップ)', 'info');

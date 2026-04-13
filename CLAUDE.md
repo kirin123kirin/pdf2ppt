@@ -79,10 +79,17 @@ in    = pt / 72
 - **重複 getImageData**: ページごとに `getImageData` を複数回呼んでいた（~24 MB のコピー × N回）。レンダリング直後に 1 回だけ取得した `origData` を使い回すよう修正。
 - **maskText 内部 getImageData**: `maskText` が内部で `ctx.getImageData` を呼んでいた。`origData` を `Uint8ClampedArray` で複製して加工する方式に変更。
 
-## OCR について
+## OCR とオフラインキャッシュについて
 
-PaddleOCR (`@paddle-js-models/ocr`) は `esm.sh` CDN 経由で動的 import します。  
-ローカルバンドルは複雑なため、OCR 機能はオンライン環境専用です。  
+PaddleOCR (`@paddle-js-models/ocr`) は `esm.sh` CDN 経由で動的 import します。
+
+**Service Worker (`sw.js`)** が以下のオリジンへのリクエストをキャッシュします:
+- `esm.sh` — PaddleOCR JS モジュール・依存ライブラリ
+- `bj.bcebos.com` — PaddleOCR モデルファイル（ONNX 重みなど）
+
+初回アクセス時に全ファイルをキャッシュし、以降はオフライン環境でも動作します。  
+Service Worker は `http://` / `https://` 環境でのみ有効（`file://` は非対応）。
+
 PDF 内蔵テキストがある場合は OCR をスキップします（`use-pdftext` チェックボックス）。
 
 ## Python 版との関係
