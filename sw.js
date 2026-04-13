@@ -1,13 +1,13 @@
 'use strict';
 
-const CACHE_NAME = 'pdf2ppt-ocr-v3';
+const CACHE_NAME = 'pdf2ppt-ocr-v4';
 
-// Transformers.js 本体(cdn.jsdelivr.net/@xenova)と
-// TrOCR モデルファイル(huggingface.co/Xenova)をキャッシュ対象とする
+// Transformers.js v3 本体(cdn.jsdelivr.net/@huggingface)と
+// manga-ocr-base モデルファイル(huggingface.co/onnx-community)をキャッシュ対象とする
 const CACHE_ORIGINS = [
-  'cdn.jsdelivr.net/npm/@xenova/transformers',
-  'huggingface.co/Xenova',
-  'huggingface.co/datasets/Xenova'
+  'cdn.jsdelivr.net/npm/@huggingface/transformers',
+  'huggingface.co/onnx-community',
+  'huggingface.co/datasets/onnx-community'
 ];
 
 self.addEventListener('install', () => self.skipWaiting());
