@@ -58,6 +58,31 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
 }
 .opt-label input[type=checkbox] { accent-color: #cba6f7; width: 16px; height: 16px; }
 
+.hf-token-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 640px;
+  width: 100%;
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: #a6adc8;
+}
+.hf-token-row input[type=password] {
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  color: #cdd6f4;
+  font-size: 0.8rem;
+  padding: 5px 9px;
+  width: 260px;
+  font-family: monospace;
+}
+.hf-token-row input[type=password]:focus { outline: none; border-color: #cba6f7; }
+.hf-token-row a { color: #89b4fa; font-size: 0.8rem; text-decoration: none; }
+.hf-token-row a:hover { text-decoration: underline; }
+
 .progress-wrap {
   width: 100%;
   max-width: 640px;
@@ -153,6 +178,13 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
     <input type="checkbox" id="transparent-bg" checked>
     図形ブロックの背景を透過する
   </label>
+</div>
+
+<div class="hf-token-row">
+  <span>HF トークン:</span>
+  <input type="password" id="hf-token" placeholder="hf_...（401 エラー時に入力）" autocomplete="off">
+  <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">取得する →</a>
+  <small style="color:#585b70;font-size:0.75rem">入力後は自動保存</small>
 </div>
 
 <div class="warn-box" id="warn-box">
@@ -446,6 +478,10 @@ async function initOcr() {
     env.localModelPath    = './lib/models/';
     env.allowRemoteModels = true;
 
+    // HuggingFace トークン（ゲート付きモデルに必要）
+    const hfToken = document.getElementById('hf-token').value.trim();
+    if (hfToken) env.accessToken = hfToken;
+
     // 進捗ログを 10% 単位に間引く（毎チャンク出力によるスパムを防止）
     const _dlSeen = {};
     ocrPipeline = await pipeline('image-to-text', TROCR_MODEL, {
@@ -469,7 +505,15 @@ async function initOcr() {
     return true;
   } catch(e) {
     document.getElementById('warn-box').style.display = 'none';
-    log(`[WARN] OCR 利用不可: ${e.message || e}`, 'warn');
+    const isUnauth = e.message && (e.message.includes('Unauthorized') || e.message.includes('401'));
+    if (isUnauth) {
+      log('[WARN] OCR 利用不可: HuggingFace トークンが必要です。'
+        + ' ① huggingface.co でアカウント作成'
+        + ' ② onnx-community/manga-ocr-base のページで利用規約に同意'
+        + ' ③ [HF トークン] 欄に読み取りトークンを入力して再度変換してください。', 'warn');
+    } else {
+      log(`[WARN] OCR 利用不可: ${e.message || e}`, 'warn');
+    }
     console.error('[OCR init error]', e);
     ocrPipeline = null;
     return false;
@@ -815,6 +859,15 @@ window.addEventListener('load', () => {
   if (typeof pdfjsLib !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
   }
+  // HF トークンを localStorage から復元
+  const savedToken = localStorage.getItem('hf-token');
+  if (savedToken) document.getElementById('hf-token').value = savedToken;
+});
+
+document.getElementById('hf-token').addEventListener('change', e => {
+  const val = e.target.value.trim();
+  if (val) localStorage.setItem('hf-token', val);
+  else localStorage.removeItem('hf-token');
 });
 
 const dropZone  = document.getElementById('drop-zone');
