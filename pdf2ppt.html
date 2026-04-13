@@ -423,7 +423,6 @@ function extractBlocks(canvas, scale, useTransparent) {
 
 // ─── Transformers.js + TrOCR 初期化 ─────────────────────────────────────────
 let ocrPipeline = null;
-let _RawImage   = null;
 
 // Transformers.js CDN URL (lib/ にあればローカル優先)
 const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
@@ -442,24 +441,28 @@ async function initPaddleOcr() {
       if (r.ok) importUrl = 'lib/transformers.min.js';
     } catch(e) {}
 
-    const { pipeline, RawImage, env } = await import(importUrl);
-    _RawImage = RawImage;
+    const { pipeline, env } = await import(importUrl);
 
     // ローカルモデルが lib/models/ にあれば優先使用
     env.allowLocalModels  = true;
     env.localModelPath    = './lib/models/';
     env.allowRemoteModels = true;
 
+    // 進捗ログを 10% 単位に間引く（毎チャンク出力によるスパムを防止）
+    const _dlSeen = {};
     ocrPipeline = await pipeline('image-to-text', TROCR_MODEL, {
       progress_callback: (prog) => {
         // v2: status='downloading'  v3: status='download' / status='progress'
         const isDl = prog.status === 'downloading' || prog.status === 'download' || prog.status === 'progress';
-        if (isDl) {
-          const pct = prog.total > 0
-            ? Math.round(prog.loaded / prog.total * 100)
-            : Math.round(prog.progress ?? 0);
-          log(`  モデル DL: ${prog.file ?? prog.name ?? ''} ${pct}%`, 'info');
-        }
+        if (!isDl) return;
+        const pct = prog.total > 0
+          ? Math.round(prog.loaded / prog.total * 100)
+          : Math.round(prog.progress ?? 0);
+        const key = (prog.file ?? prog.name ?? '');
+        const step = Math.floor(pct / 10);
+        if (_dlSeen[key] === step) return; // 前回と同じ 10% 台はスキップ
+        _dlSeen[key] = step;
+        log(`  モデル DL: ${key} ${pct}%`, 'info');
       }
     });
 
