@@ -426,8 +426,8 @@ let ocrPipeline = null;
 let _RawImage   = null;
 
 // Transformers.js CDN URL (lib/ にあればローカル優先)
-const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js';
-const TROCR_MODEL      = 'Xenova/trocr-small-printed';
+const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+const TROCR_MODEL      = 'onnx-community/manga-ocr-base'; // 日本語特化 OCR モデル
 
 async function initPaddleOcr() {
   if (ocrPipeline) return true;
@@ -452,8 +452,12 @@ async function initPaddleOcr() {
 
     ocrPipeline = await pipeline('image-to-text', TROCR_MODEL, {
       progress_callback: (prog) => {
-        if (prog.status === 'downloading') {
-          const pct = prog.total > 0 ? Math.round(prog.loaded / prog.total * 100) : '?';
+        // v2: status='downloading'  v3: status='download' / status='progress'
+        const isDl = prog.status === 'downloading' || prog.status === 'download' || prog.status === 'progress';
+        if (isDl) {
+          const pct = prog.total > 0
+            ? Math.round(prog.loaded / prog.total * 100)
+            : Math.round(prog.progress ?? 0);
           log(`  モデル DL: ${prog.file ?? prog.name ?? ''} ${pct}%`, 'info');
         }
       }
