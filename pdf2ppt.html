@@ -356,7 +356,7 @@ function trimMargins(data, x0, y0, x1, y1, W) {
 function makeTransparentBg(srcCanvas, x0, y0, bw, bh) {
   const off = document.createElement('canvas');
   off.width = bw; off.height = bh;
-  const ctx = off.getContext('2d');
+  const ctx = off.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(srcCanvas, x0, y0, bw, bh, 0, 0, bw, bh);
   const imgData = ctx.getImageData(0, 0, bw, bh);
   const d = imgData.data;
@@ -392,7 +392,7 @@ function makeTransparentBg(srcCanvas, x0, y0, bw, bh) {
 
 function extractBlocks(canvas, scale, useTransparent) {
   const W = canvas.width, H = canvas.height;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const imgData = ctx.getImageData(0, 0, W, H);
   const data = imgData.data;
   const rawBlocks = detectBlocks(data, W, H);
@@ -436,7 +436,7 @@ async function initOcr() {
     let importUrl = TRANSFORMERS_CDN;
     try {
       const r = await fetch('lib/transformers.min.js', { method: 'HEAD' });
-      if (r.ok) importUrl = 'lib/transformers.min.js';
+      if (r.ok) importUrl = './lib/transformers.min.js';
     } catch(e) {}
 
     const { pipeline, env } = await import(importUrl);
@@ -469,7 +469,8 @@ async function initOcr() {
     return true;
   } catch(e) {
     document.getElementById('warn-box').style.display = 'none';
-    log(`[WARN] OCR 利用不可: ${e.message}`, 'warn');
+    log(`[WARN] OCR 利用不可: ${e.message || e}`, 'warn');
+    console.error('[OCR init error]', e);
     ocrPipeline = null;
     return false;
   }
@@ -685,7 +686,7 @@ async function processPDF(file) {
     const canvas  = document.createElement('canvas');
     canvas.width  = Math.round(viewport.width);
     canvas.height = Math.round(viewport.height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     await page.render({ canvasContext: ctx, viewport }).promise;
     const W = canvas.width, H = canvas.height;
     const origData = ctx.getImageData(0, 0, W, H);  // 元画像を一度だけ取得
