@@ -1,5 +1,17 @@
 # CLAUDE.md — 開発ガイド
 
+## Git ワークフロー
+
+**変更は必ず `main` ブランチに直接 push すること。**
+
+```bash
+git add <files>
+git commit -m "..."
+git push origin main
+```
+
+フィーチャーブランチは使用しない。
+
 ## 概要
 
 `pdf2ppt.html` は単一 HTML ファイルで動作する PDF→PPTX 変換ツールです。  
