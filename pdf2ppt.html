@@ -428,7 +428,7 @@ let ocrPipeline = null;
 const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
 const TROCR_MODEL      = 'onnx-community/manga-ocr-base'; // 日本語特化 OCR モデル
 
-async function initPaddleOcr() {
+async function initOcr() {
   if (ocrPipeline) return true;
   document.getElementById('warn-box').style.display = 'block';
   try {
@@ -529,7 +529,7 @@ function detectTextLineRects(imgData, width, height) {
       x1: Math.min(width,  x1 + PAD),
       y1: Math.min(height, seg.y1 + PAD)
     };
-  }).filter(r => (r.x1 - r.x0) >= 10 && (r.y1 - r.y0) >= 8);
+  }).filter(r => (r.x1 - r.x0) * (r.y1 - r.y0) >= MIN_BLOCK_AREA);
 }
 
 // ─── PaddleOCR 結果処理（4点ポリゴン → 軸平行 bbox）────────────────────────
@@ -663,7 +663,7 @@ async function processPDF(file) {
   // ─ OCR 初期化 ─
   let ocrReady = false;
   if (ocrEnabled) {
-    ocrReady = await initPaddleOcr();
+    ocrReady = await initOcr();
     if (!ocrReady) {
       log('[WARN] OCR 利用不可のため OCR をスキップします', 'warn');
     }
