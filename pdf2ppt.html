@@ -58,30 +58,6 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
 }
 .opt-label input[type=checkbox] { accent-color: #cba6f7; width: 16px; height: 16px; }
 
-.hf-token-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  max-width: 640px;
-  width: 100%;
-  margin-top: 10px;
-  font-size: 0.85rem;
-  color: #a6adc8;
-}
-.hf-token-row input[type=password] {
-  background: #1e1e2e;
-  border: 1px solid #45475a;
-  border-radius: 6px;
-  color: #cdd6f4;
-  font-size: 0.8rem;
-  padding: 5px 9px;
-  width: 260px;
-  font-family: monospace;
-}
-.hf-token-row input[type=password]:focus { outline: none; border-color: #cba6f7; }
-.hf-token-row a { color: #89b4fa; font-size: 0.8rem; text-decoration: none; }
-.hf-token-row a:hover { text-decoration: underline; }
 
 .progress-wrap {
   width: 100%;
@@ -180,12 +156,6 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
   </label>
 </div>
 
-<div class="hf-token-row">
-  <span>HF トークン:</span>
-  <input type="password" id="hf-token" placeholder="hf_...（401 エラー時に入力）" autocomplete="off">
-  <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">取得する →</a>
-  <small style="color:#585b70;font-size:0.75rem">入力後は自動保存</small>
-</div>
 
 <div class="warn-box" id="warn-box">
   ⏳ OCR モデルを読み込み中... 初回のみ数十秒かかります。
@@ -208,7 +178,9 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
   onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';s.onload=function(){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';};document.head.appendChild(s);"></script>
 <script src="lib/pptxgen.bundle.js"
   onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';document.head.appendChild(s);"></script>
-<!-- Transformers.js は dynamic import で読み込む（OCR 初期化時） -->
+<!-- Tesseract.js: OCR エンジン (lib/ 優先, なければ CDN) -->
+<script src="lib/tesseract.min.js"
+  onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';document.head.appendChild(s);"></script>
 
 <script>
 "use strict";
@@ -451,168 +423,65 @@ function extractBlocks(canvas, scale, useTransparent) {
   return results;
 }
 
-// ─── Transformers.js + TrOCR 初期化 ─────────────────────────────────────────
-let ocrPipeline = null;
-
-// Transformers.js CDN URL (lib/ にあればローカル優先)
-const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
-const TROCR_MODEL      = 'onnx-community/manga-ocr-base'; // 日本語特化 OCR モデル
+// ─── Tesseract.js OCR 初期化 ──────────────────────────────────────────────────
+let ocrWorker = null;
 
 async function initOcr() {
-  if (ocrPipeline) return true;
+  if (ocrWorker) return true;
   document.getElementById('warn-box').style.display = 'block';
   try {
-    log('OCR モデル読み込み中 (初回のみ数分かかる場合があります)...', 'info');
-
-    // lib/transformers.min.js があればローカル優先
-    let importUrl = TRANSFORMERS_CDN;
-    try {
-      const r = await fetch('lib/transformers.min.js', { method: 'HEAD' });
-      if (r.ok) importUrl = './lib/transformers.min.js';
-    } catch(e) {}
-
-    const { pipeline, env } = await import(importUrl);
-
-    // ローカルモデルが lib/models/ にあれば優先使用
-    env.allowLocalModels  = true;
-    env.localModelPath    = './lib/models/';
-    env.allowRemoteModels = true;
-
-    // HuggingFace トークン（ゲート付きモデルに必要）
-    const hfToken = document.getElementById('hf-token').value.trim();
-    if (hfToken) env.accessToken = hfToken;
-
-    // 進捗ログを 10% 単位に間引く（毎チャンク出力によるスパムを防止）
-    const _dlSeen = {};
-    ocrPipeline = await pipeline('image-to-text', TROCR_MODEL, {
-      progress_callback: (prog) => {
-        // v2: status='downloading'  v3: status='download' / status='progress'
-        const isDl = prog.status === 'downloading' || prog.status === 'download' || prog.status === 'progress';
-        if (!isDl) return;
-        const pct = prog.total > 0
-          ? Math.round(prog.loaded / prog.total * 100)
-          : Math.round(prog.progress ?? 0);
-        const key = (prog.file ?? prog.name ?? '');
+    log('OCR 初期化中 (日本語モデル、初回のみ言語データ ~10MB をダウンロードします)...', 'info');
+    const _seen = {};
+    ocrWorker = await Tesseract.createWorker('jpn', 1, {
+      logger: m => {
+        if (!m.status) return;
+        const pct  = Math.round((m.progress ?? 0) * 100);
         const step = Math.floor(pct / 10);
-        if (_dlSeen[key] === step) return; // 前回と同じ 10% 台はスキップ
-        _dlSeen[key] = step;
-        log(`  モデル DL: ${key} ${pct}%`, 'info');
+        if (_seen[m.status] === step) return;
+        _seen[m.status] = step;
+        log(`  ${m.status}: ${pct}%`, 'info');
       }
     });
-
     document.getElementById('warn-box').style.display = 'none';
-    log('OCR 初期化完了 (TrOCR)', 'info');
+    log('OCR 初期化完了 (Tesseract.js / 日本語)', 'info');
     return true;
   } catch(e) {
     document.getElementById('warn-box').style.display = 'none';
-    const isUnauth = e.message && (e.message.includes('Unauthorized') || e.message.includes('401'));
-    if (isUnauth) {
-      log('[WARN] OCR 利用不可: HuggingFace トークンが必要です。'
-        + ' ① huggingface.co でアカウント作成'
-        + ' ② onnx-community/manga-ocr-base のページで利用規約に同意'
-        + ' ③ [HF トークン] 欄に読み取りトークンを入力して再度変換してください。', 'warn');
-    } else {
-      log(`[WARN] OCR 利用不可: ${e.message || e}`, 'warn');
-    }
+    log(`[WARN] OCR 利用不可: ${e.message || e}`, 'warn');
     console.error('[OCR init error]', e);
-    ocrPipeline = null;
+    ocrWorker = null;
     return false;
   }
+}
+
+/** Tesseract data.lines を textRows 形式に変換 */
+function tesseractToRows(lines, scale, imgDataArray, W, H, minConf = 60) {
+  const rows = [];
+  for (const line of lines) {
+    const text = line.text.replace(/\n/g, '').trim();
+    if (!text || line.confidence < minConf) continue;
+    const { x0: x0_px, y0: y0_px, x1: x1_px, y1: y1_px } = line.bbox;
+    if (x1_px <= x0_px || y1_px <= y0_px) continue;
+    rows.push({
+      text,
+      score: line.confidence / 100,
+      x0_px: Math.max(0, x0_px),
+      y0_px: Math.max(0, y0_px),
+      x1_px: Math.min(W, x1_px),
+      y1_px: Math.min(H, y1_px),
+      x0: x0_px / scale, y0: y0_px / scale,
+      x1: x1_px / scale, y1: y1_px / scale,
+      font_size:  snapFontSize((y1_px - y0_px) / scale),
+      font_color: getTextColor(imgDataArray, x0_px, y0_px, x1_px, y1_px, W),
+    });
+  }
+  return rows;
 }
 
 /**
  * 行投影で非白ピクセルが連続する横帯を検出し、テキスト行候補 bbox 配列を返す
  * @returns {{x0,y0,x1,y1}[]}
  */
-function detectTextLineRects(imgData, width, height) {
-  const data = imgData.data;
-  const rowDensity = new Float32Array(height);
-  for (let y = 0; y < height; y++) {
-    let cnt = 0;
-    for (let x = 0; x < width; x++) {
-      const i = (y * width + x) * 4;
-      const lum = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-      if (lum < NON_WHITE_THR) cnt++;
-    }
-    rowDensity[y] = cnt / width;
-  }
-
-  // 連続した非空行をセグメント化（小ギャップは吸収）
-  const LINE_GAP = 4;   // この行数以下のギャップは連結
-  const ROW_THR  = 0.003; // 0.3% 以上の非白ピクセルで「行あり」と判定
-  const segments = [];
-  let start = -1, gap = 0;
-  for (let y = 0; y < height; y++) {
-    if (rowDensity[y] > ROW_THR) {
-      if (start < 0) start = y;
-      gap = 0;
-    } else if (start >= 0) {
-      if (++gap > LINE_GAP) {
-        segments.push({ y0: start, y1: y - gap });
-        start = -1; gap = 0;
-      }
-    }
-  }
-  if (start >= 0) segments.push({ y0: start, y1: height - 1 });
-
-  // 各セグメントの実際のX範囲を取得してパディングを加える
-  const PAD = 4;
-  return segments.map(seg => {
-    let x0 = width, x1 = 0;
-    for (let y = seg.y0; y <= seg.y1; y++) {
-      for (let x = 0; x < width; x++) {
-        const i = (y * width + x) * 4;
-        const lum = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-        if (lum < NON_WHITE_THR) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
-      }
-    }
-    return {
-      x0: Math.max(0, x0 - PAD),
-      y0: Math.max(0, seg.y0 - PAD),
-      x1: Math.min(width,  x1 + PAD),
-      y1: Math.min(height, seg.y1 + PAD)
-    };
-  }).filter(r => (r.x1 - r.x0) * (r.y1 - r.y0) >= MIN_BLOCK_AREA);
-}
-
-// ─── PaddleOCR 結果処理（4点ポリゴン → 軸平行 bbox）────────────────────────
-function processOcrResults(items, scale, origData, W, H) {
-  // PaddleOCR は items 配列または { text: [...] } を返す
-  const arr = Array.isArray(items) ? items : (items?.text ?? []);
-  const results = [];
-  for (const item of arr) {
-    if (!item.text?.trim()) continue;
-    if (item.score != null && item.score < 0.5) continue;
-    const box = item.box;
-    if (!box) continue;
-    // box は [[x,y],[x,y],[x,y],[x,y]] または [x,y,x,y,...] のどちらか
-    let pts;
-    if (Array.isArray(box[0])) {
-      pts = box;
-    } else {
-      // フラット配列 [x0,y0,x1,y1,...] を [[x,y],...] に変換
-      pts = [];
-      for (let j = 0; j < box.length; j += 2) pts.push([box[j], box[j+1]]);
-    }
-    const xs = pts.map(p => p[0]);
-    const ys = pts.map(p => p[1]);
-    const x0_px = Math.max(0, Math.floor(Math.min(...xs)));
-    const y0_px = Math.max(0, Math.floor(Math.min(...ys)));
-    const x1_px = Math.min(W, Math.ceil(Math.max(...xs)));
-    const y1_px = Math.min(H, Math.ceil(Math.max(...ys)));
-    if (x1_px <= x0_px || y1_px <= y0_px) continue;
-    results.push({
-      text:       item.text.trim(),
-      score:      item.score ?? 1,
-      font_size:  snapFontSize((y1_px - y0_px) / scale),
-      font_color: getTextColor(origData, x0_px, y0_px, x1_px, y1_px, W),
-      x0_px, y0_px, x1_px, y1_px,
-      x0: x0_px / scale, y0: y0_px / scale,
-      x1: x1_px / scale, y1: y1_px / scale,
-    });
-  }
-  return results;
-}
 
 // ─── PDF内蔵テキスト抽出 ─────────────────────────────────────────────────────
 // ベクタPDFには元のテキストデータが埋め込まれており、これを使うと精度100%
@@ -774,34 +643,13 @@ async function processPDF(file) {
       }
     }
 
-    // 方法2: Transformers.js + TrOCR（内蔵テキストがない場合）
-    if (ocrReady && ocrPipeline && textRows.length === 0) {
-      log('  OCR 実行中 (TrOCR)...', 'info');
+    // 方法2: Tesseract.js OCR（内蔵テキストがない場合）
+    if (ocrReady && ocrWorker && textRows.length === 0) {
+      log('  OCR 実行中 (Tesseract.js)...', 'info');
       try {
-        const lineRects = detectTextLineRects(origData, W, H);
-        log(`  テキスト行検出: ${lineRects.length} 件`, 'info');
-        const items = [];
-        for (const r of lineRects) {
-          const lc = document.createElement('canvas');
-          lc.width  = r.x1 - r.x0;
-          lc.height = r.y1 - r.y0;
-          lc.getContext('2d').drawImage(canvas, r.x0, r.y0, lc.width, lc.height, 0, 0, lc.width, lc.height);
-          try {
-            // canvas → Data URL → Transformers.js pipeline
-            const dataURL = lc.toDataURL('image/png');
-            const result  = await ocrPipeline(dataURL);
-            const text    = (result?.[0]?.generated_text ?? '').trim();
-            if (text) {
-              items.push({
-                text, score: 1.0,
-                box: [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]]
-              });
-            }
-          } catch(lineErr) { /* 1行エラーはスキップ */ }
-        }
-        const ocrRows = processOcrResults(items, scale, origData.data, W, H);
-        log(`  OCR: ${ocrRows.length} 行認識`);
-        textRows = ocrRows;
+        const { data } = await ocrWorker.recognize(canvas);
+        textRows = tesseractToRows(data.lines, scale, origData.data, W, H);
+        log(`  OCR: ${textRows.length} 行認識`);
       } catch(e) {
         log(`  [WARN] OCR 認識失敗: ${e.message}`, 'warn');
       }
@@ -912,27 +760,11 @@ async function processImage(file) {
 
   // ─ OCR 実行 ─
   let textRows = [];
-  if (ocrReady && ocrPipeline) {
-    log('  OCR 実行中 (TrOCR)...', 'info');
+  if (ocrReady && ocrWorker) {
+    log('  OCR 実行中 (Tesseract.js)...', 'info');
     try {
-      const lineRects = detectTextLineRects(origData, W, H);
-      log(`  テキスト行検出: ${lineRects.length} 件`, 'info');
-      const items = [];
-      for (const r of lineRects) {
-        const lc = document.createElement('canvas');
-        lc.width  = r.x1 - r.x0;
-        lc.height = r.y1 - r.y0;
-        lc.getContext('2d').drawImage(canvas, r.x0, r.y0, lc.width, lc.height, 0, 0, lc.width, lc.height);
-        try {
-          const result = await ocrPipeline(lc.toDataURL('image/png'));
-          const text   = (result?.[0]?.generated_text ?? '').trim();
-          if (text) items.push({
-            text, score: 1.0,
-            box: [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]]
-          });
-        } catch(lineErr) { /* 1行エラーはスキップ */ }
-      }
-      textRows = processOcrResults(items, scale, origData.data, W, H);
+      const { data } = await ocrWorker.recognize(canvas);
+      textRows = tesseractToRows(data.lines, scale, origData.data, W, H);
       log(`  OCR: ${textRows.length} 行認識`);
     } catch(e) {
       log(`  [WARN] OCR 認識失敗: ${e.message}`, 'warn');
@@ -1016,15 +848,6 @@ window.addEventListener('load', () => {
   if (typeof pdfjsLib !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
   }
-  // HF トークンを localStorage から復元
-  const savedToken = localStorage.getItem('hf-token');
-  if (savedToken) document.getElementById('hf-token').value = savedToken;
-});
-
-document.getElementById('hf-token').addEventListener('change', e => {
-  const val = e.target.value.trim();
-  if (val) localStorage.setItem('hf-token', val);
-  else localStorage.removeItem('hf-token');
 });
 
 const dropZone  = document.getElementById('drop-zone');

@@ -9,43 +9,21 @@ curl -fL "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.
 REM PptxGenJS
 curl -fL "https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js" -o "lib\pptxgen.bundle.js"
 
-REM Transformers.js v3 (OCR エンジン本体)
-curl -fL "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js" -o "lib\transformers.min.js"
+REM Tesseract.js v5 (OCR エンジン本体)
+REM  ※ 日本語言語データ (~10MB) は初回 OCR 実行時にブラウザが自動ダウンロード・キャッシュします
+curl -fL "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" -o "lib\tesseract.min.js"
 
 REM -----------------------------------------------------------------------
-REM OCR モデル (onnx-community/manga-ocr-base) のダウンロード
+REM Tesseract.js 日本語言語データについて
 REM
-REM このモデルはゲート付き（HuggingFace アカウント + 利用規約同意が必要）。
-REM 以下のいずれかの方法でダウンロードしてください。
+REM   言語データ (jpn.traineddata, ~10MB) は初回 OCR 実行時に
+REM   ブラウザが自動的にダウンロード・IndexedDB にキャッシュします。
+REM   2回目以降はオフラインでも動作します。
 REM
-REM 【方法1】huggingface-cli（推奨）
-REM   事前に: pip install huggingface_hub
-REM           huggingface-cli login   ← ブラウザでトークン発行・貼り付け
-REM
-REM   実行:
-REM     huggingface-cli download onnx-community/manga-ocr-base ^
-REM       --local-dir lib\models\onnx-community\manga-ocr-base
-REM
-REM 【方法2】git clone（Git LFS 必須）
-REM   事前に: git lfs install
-REM   実行:
-REM     git clone https://huggingface.co/onnx-community/manga-ocr-base ^
-REM       lib\models\onnx-community\manga-ocr-base
-REM
-REM 【方法3】ブラウザで手動ダウンロード
-REM   1. https://huggingface.co/onnx-community/manga-ocr-base/tree/main を開く
-REM   2. ログイン → 利用規約に同意
-REM   3. 以下のファイルをダウンロードし lib\models\onnx-community\manga-ocr-base\ に配置:
-REM        config.json
-REM        generation_config.json
-REM        preprocessor_config.json
-REM        special_tokens_map.json
-REM        tokenizer.json
-REM        tokenizer_config.json
-REM        onnx\encoder_model_quantized.onnx   (または encoder_model.onnx)
-REM        onnx\decoder_model_merged_quantized.onnx  (または decoder_model_merged.onnx)
-REM
-REM ダウンロード済みなら起動後はオフラインで動作します。
+REM   完全オフライン環境で事前にダウンロードしたい場合:
+REM     curl -fL "https://tessdata.projectnaptha.com/4.0.0/jpn.traineddata.gz" ^
+REM       -o "lib\jpn.traineddata.gz"
+REM   ※ 配置後は Tesseract.createWorker の langPath オプション設定が別途必要です
 REM -----------------------------------------------------------------------
 
 echo Done.
