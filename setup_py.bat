@@ -94,12 +94,8 @@ echo.
 echo ============================================================
 echo  セットアップ完了！
 echo.
-echo  実行方法（run.bat を使うと簡単）:
-echo    run.bat input.pdf
-echo    run.bat              （クリップボードから）
-echo.
-echo  または直接実行:
-echo    set HF_HOME=%HF_MODELS_DIR%
-echo    python_env\python.exe pdf2ppt.py input.pdf
+echo  実行方法:
+echo    pdf2ppt.bat input.pdf
+echo    pdf2ppt.bat              （クリップボードから）
 echo ============================================================
 pause
