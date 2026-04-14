@@ -63,6 +63,8 @@ echo  [4b] その他のライブラリをインストール中...
   pillow ^
   janome ^
   python-pptx ^
+  flask ^
+  svglib ^
   "transformers==4.57.3" ^
   surya-ocr
 
@@ -94,8 +96,7 @@ echo.
 echo ============================================================
 echo  セットアップ完了！
 echo.
-echo  実行方法:
-echo    pdf2ppt.bat input.pdf
-echo    pdf2ppt.bat              （クリップボードから）
+echo  Web UI 起動:  start.bat
+echo  CLI 実行:     pdf2ppt.bat input.pdf
 echo ============================================================
 pause
