@@ -8,34 +8,34 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: "メイリオ", Meiryo, "Yu Gothic", sans-serif;
-  background: #1e1e2e;
-  color: #cdd6f4;
+  background: #f5f7fa;
+  color: #1f2937;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 32px 16px;
 }
-h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
-.subtitle { font-size: 0.85rem; color: #6c7086; margin-bottom: 28px; }
+h1 { font-size: 1.6rem; margin-bottom: 8px; color: #2563eb; }
+.subtitle { font-size: 0.85rem; color: #6b7280; margin-bottom: 28px; }
 
 #drop-zone {
   width: 100%;
   max-width: 640px;
-  border: 2px dashed #585b70;
+  border: 2px dashed #9ca3af;
   border-radius: 12px;
   padding: 48px 24px;
   text-align: center;
   cursor: pointer;
   transition: all .2s;
-  background: #181825;
-  color: #a6adc8;
+  background: #ffffff;
+  color: #6b7280;
   font-size: 1rem;
 }
 #drop-zone:hover, #drop-zone.drag-over {
-  border-color: #cba6f7;
-  background: #1e1e2e;
-  color: #cba6f7;
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #2563eb;
 }
 #drop-zone .icon { font-size: 3rem; display: block; margin-bottom: 12px; }
 #file-input { display: none; }
@@ -54,9 +54,9 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
   gap: 6px;
   font-size: 0.9rem;
   cursor: pointer;
-  color: #a6adc8;
+  color: #374151;
 }
-.opt-label input[type=checkbox] { accent-color: #cba6f7; width: 16px; height: 16px; }
+.opt-label input[type=checkbox] { accent-color: #2563eb; width: 16px; height: 16px; }
 
 
 .progress-wrap {
@@ -66,7 +66,7 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
   display: none;
 }
 .progress-bar-bg {
-  background: #313244;
+  background: #e5e7eb;
   border-radius: 6px;
   height: 10px;
   overflow: hidden;
@@ -74,18 +74,19 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
 }
 .progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, #cba6f7, #89b4fa);
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
   border-radius: 6px;
   width: 0%;
   transition: width .3s;
 }
-.progress-text { font-size: 0.85rem; color: #6c7086; text-align: right; }
+.progress-text { font-size: 0.85rem; color: #6b7280; text-align: right; }
 
 #log {
   width: 100%;
   max-width: 640px;
   margin-top: 16px;
-  background: #11111b;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 16px;
   font-family: "Consolas", monospace;
@@ -94,17 +95,17 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
   overflow-y: auto;
   display: none;
   line-height: 1.6;
-  color: #a6e3a1;
+  color: #166534;
 }
-#log .err { color: #f38ba8; }
-#log .info { color: #89dceb; }
-#log .warn { color: #f9e2af; }
-#log .sep { color: #585b70; }
+#log .err { color: #dc2626; }
+#log .info { color: #1d4ed8; }
+#log .warn { color: #92400e; }
+#log .sep { color: #9ca3af; }
 
 .btn-wrap { margin-top: 20px; display: none; }
 #btn-download {
-  background: #a6e3a1;
-  color: #1e1e2e;
+  background: #2563eb;
+  color: #ffffff;
   border: none;
   border-radius: 8px;
   padding: 10px 28px;
@@ -113,7 +114,7 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
   cursor: pointer;
   font-family: inherit;
 }
-#btn-download:hover { background: #94e2d5; }
+#btn-download:hover { background: #1d4ed8; }
 
 .warn-box {
   width: 100%;
@@ -121,10 +122,10 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
   margin-top: 20px;
   padding: 12px 16px;
   border-radius: 8px;
-  background: #1e1e2e;
-  border: 1px solid #f9e2af44;
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
   font-size: 0.8rem;
-  color: #f9e2af;
+  color: #92400e;
   display: none;
 }
 </style>
@@ -193,7 +194,7 @@ const MIN_BLOCK_AREA      = 50;
 const TEXT_PAD_RATIO      = 0.15;
 const BG_MARGIN           = 8;
 
-const FONT_SIZES = [6,7,8,9,10,10.5,11,12,14,16,18,20,
+const FONT_SIZES = [6,7,8,9,10,11,12,14,16,18,20,
                     24,28,32,36,40,44,48,54,60,66,72,80,88,96];
 
 // ─── ユーティリティ ──────────────────────────────────────────────────────────
@@ -808,7 +809,7 @@ async function processImage(file) {
       w: Math.max(row.x1 - row.x0, 1) / IMG_DPI,
       h: Math.max(row.y1 - row.y0, 1) / IMG_DPI,
       fontFace:    'メイリオ',
-      fontSize:    row.font_size * 72 / IMG_DPI, // px→pt (96dpi基準)
+      fontSize:    snapFontSize(row.font_size * 72 / IMG_DPI), // px→pt→標準サイズにスナップ
       color:       row.font_color || '000000',
       wrap:        false,
       valign:      'top',
