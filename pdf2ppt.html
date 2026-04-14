@@ -160,10 +160,10 @@ h1 { font-size: 1.6rem; margin-bottom: 8px; color: #cba6f7; }
 
 <div id="drop-zone">
   <span class="icon">📄</span>
-  PDFファイルをここにドロップ<br>
-  <small style="color:#585b70;margin-top:8px;display:block">または クリックしてファイルを選択</small>
+  PDF・画像ファイルをここにドロップ<br>
+  <small style="color:#585b70;margin-top:8px;display:block">または クリックしてファイルを選択 / Ctrl+V でクリップボードから貼り付け</small>
 </div>
-<input type="file" id="file-input" accept=".pdf">
+<input type="file" id="file-input" accept=".pdf,image/*">
 
 <div class="options">
   <label class="opt-label">
@@ -667,6 +667,17 @@ function setProgress(cur, total) {
 let pptxBlob = null;
 let outputFileName = 'output.pptx';
 
+/** File オブジェクト or Blob から HTMLImageElement を生成して返す */
+function loadImage(fileOrBlob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(fileOrBlob);
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('画像読み込み失敗')); };
+    img.src = url;
+  });
+}
+
 async function processPDF(file) {
   pptxBlob = null;
   document.getElementById('btn-wrap').style.display = 'none';
@@ -853,6 +864,152 @@ async function processPDF(file) {
   }
 }
 
+// ─── 画像処理 (JPEG / PNG 等) ────────────────────────────────────────────────
+const IMG_DPI = 96; // スクリーン標準解像度
+
+async function processImage(file) {
+  pptxBlob = null;
+  document.getElementById('btn-wrap').style.display  = 'none';
+  logEl.style.display = 'block';
+  logEl.innerHTML = '';
+  document.getElementById('progress-wrap').style.display = 'block';
+  setProgress(0, 1);
+
+  const ocrEnabled     = document.getElementById('ocr-enabled').checked;
+  const useTransparent = document.getElementById('transparent-bg').checked;
+
+  const baseName = (file.name || 'image').replace(/\.[^.]+$/, '');
+  outputFileName = baseName + '.pptx';
+  log(`処理開始: ${file.name || '(クリップボード画像)'}`, 'info');
+
+  // ─ 画像をキャンバスに展開 ─
+  let img;
+  try {
+    img = await loadImage(file);
+  } catch(e) {
+    log(`[ERROR] 画像読み込み失敗: ${e.message}`, 'err');
+    return;
+  }
+  const naturalW = img.naturalWidth;
+  const naturalH = img.naturalHeight;
+  const scale = RASTER_TARGET_WIDTH / naturalW;
+  const W = RASTER_TARGET_WIDTH;
+  const H = Math.round(naturalH * scale);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, W, H);
+  const origData = ctx.getImageData(0, 0, W, H);
+  log(`  サイズ: ${naturalW}×${naturalH}px → ラスタライズ: ${W}×${H}px  scale=${scale.toFixed(3)}`);
+
+  // ─ OCR 初期化 ─
+  let ocrReady = false;
+  if (ocrEnabled) {
+    ocrReady = await initOcr();
+    if (!ocrReady) log('[WARN] OCR 利用不可のため OCR をスキップします', 'warn');
+  }
+
+  // ─ OCR 実行 ─
+  let textRows = [];
+  if (ocrReady && ocrPipeline) {
+    log('  OCR 実行中 (TrOCR)...', 'info');
+    try {
+      const lineRects = detectTextLineRects(origData, W, H);
+      log(`  テキスト行検出: ${lineRects.length} 件`, 'info');
+      const items = [];
+      for (const r of lineRects) {
+        const lc = document.createElement('canvas');
+        lc.width  = r.x1 - r.x0;
+        lc.height = r.y1 - r.y0;
+        lc.getContext('2d').drawImage(canvas, r.x0, r.y0, lc.width, lc.height, 0, 0, lc.width, lc.height);
+        try {
+          const result = await ocrPipeline(lc.toDataURL('image/png'));
+          const text   = (result?.[0]?.generated_text ?? '').trim();
+          if (text) items.push({
+            text, score: 1.0,
+            box: [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]]
+          });
+        } catch(lineErr) { /* 1行エラーはスキップ */ }
+      }
+      textRows = processOcrResults(items, scale, origData.data, W, H);
+      log(`  OCR: ${textRows.length} 行認識`);
+    } catch(e) {
+      log(`  [WARN] OCR 認識失敗: ${e.message}`, 'warn');
+    }
+  }
+  log(`  テキスト確定: ${textRows.length} 行`);
+
+  // ─ テキスト領域をマスク ─
+  if (textRows.length > 0) {
+    const rowsWithPx = textRows.filter(r => r.x0_px !== undefined && r.y0_px !== undefined);
+    if (rowsWithPx.length > 0) maskText(ctx, origData.data, rowsWithPx, W, H);
+  }
+
+  // ─ 画像ブロック抽出 ─
+  const imgBlocks = extractBlocks(canvas, scale, useTransparent);
+  log(`  画像ブロック: ${imgBlocks.length} 件`);
+
+  // ─ PPTX 構築 ─
+  // extractBlocks/processOcrResults の x0,y0 等は「元画像ピクセル」単位
+  // PPTX座標(in) = 元画像ピクセル / IMG_DPI
+  const pptx     = new PptxGenJS();
+  const slideWIn = naturalW / IMG_DPI;
+  const slideHIn = naturalH / IMG_DPI;
+  pptx.defineLayout({ name: 'IMG_Layout', width: slideWIn, height: slideHIn });
+  pptx.layout = 'IMG_Layout';
+  const slide = pptx.addSlide();
+
+  for (const blk of imgBlocks) {
+    slide.addImage({
+      data: blk.dataUrl,
+      x: blk.x0 / IMG_DPI,
+      y: blk.y0 / IMG_DPI,
+      w: Math.max(blk.x1 - blk.x0, 1) / IMG_DPI,
+      h: Math.max(blk.y1 - blk.y0, 1) / IMG_DPI,
+    });
+  }
+  for (const row of textRows) {
+    slide.addText(row.text, {
+      x: row.x0 / IMG_DPI,
+      y: row.y0 / IMG_DPI,
+      w: Math.max(row.x1 - row.x0, 1) / IMG_DPI,
+      h: Math.max(row.y1 - row.y0, 1) / IMG_DPI,
+      fontFace:    'メイリオ',
+      fontSize:    row.font_size * 72 / IMG_DPI, // px→pt (96dpi基準)
+      color:       row.font_color || '000000',
+      wrap:        false,
+      valign:      'top',
+      charSpacing: 0,
+    });
+  }
+
+  setProgress(1, 1);
+  logSep();
+  log('PPTX 生成中...', 'info');
+  try {
+    pptxBlob = await pptx.write({ outputType: 'blob' });
+    log(`完了: ${outputFileName}  (${(pptxBlob.size/1024).toFixed(0)} KB)`, 'info');
+    document.getElementById('btn-wrap').style.display = 'block';
+  } catch(e) {
+    log(`[ERROR] PPTX 生成失敗: ${e.message}`, 'err');
+  }
+}
+
+/** PDF / 画像を拡張子・MIME で振り分ける */
+function processFile(file) {
+  if (!file) return;
+  const name = (file.name || '').toLowerCase();
+  const mime = file.type || '';
+  if (name.endsWith('.pdf') || mime === 'application/pdf') {
+    processPDF(file);
+  } else if (mime.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tiff?|avif|svg)$/.test(name)) {
+    processImage(file);
+  } else {
+    alert('PDF または画像ファイル（JPEG, PNG など）をドロップしてください');
+  }
+}
+
 // ─── UI イベント ─────────────────────────────────────────────────────────────
 // PDF.js workerSrc: ローカルがあれば使い、なければCDN
 window.addEventListener('load', () => {
@@ -875,7 +1032,7 @@ const fileInput = document.getElementById('file-input');
 
 dropZone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => {
-  if (e.target.files[0]) processPDF(e.target.files[0]);
+  if (e.target.files[0]) processFile(e.target.files[0]);
 });
 dropZone.addEventListener('dragover', e => {
   e.preventDefault(); dropZone.classList.add('drag-over');
@@ -884,9 +1041,19 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  const f = e.dataTransfer.files[0];
-  if (f && f.name.toLowerCase().endsWith('.pdf')) processPDF(f);
-  else alert('.pdf ファイルをドロップしてください');
+  processFile(e.dataTransfer.files[0]);
+});
+
+// クリップボードからの画像貼り付け (Ctrl+V / スクリーンショット等)
+document.addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      processImage(item.getAsFile());
+      break;
+    }
+  }
 });
 
 document.getElementById('btn-download').addEventListener('click', () => {
