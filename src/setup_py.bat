@@ -10,12 +10,12 @@ echo ============================================================
 echo.
 
 set PY_VER=3.11.9
-set PY_DIR=%~dp0python_env
+set PY_DIR=%~dp0..\python
 set PY_EXE=%PY_DIR%\python.exe
 set HF_MODELS_DIR=%PY_DIR%\hf_models
 
 if exist "%PY_EXE%" (
-  echo [SKIP] python_env\ は既に存在します。ライブラリ・モデルの更新のみ行います。
+  echo [SKIP] python\ は既に存在します。ライブラリ・モデルの更新のみ行います。
   goto :pip_install
 )
 
@@ -66,7 +66,7 @@ echo  [4b] その他のライブラリをインストール中...
 
 echo.
 echo [5/5] surya OCR モデルをダウンロード中...
-echo       モデルは python_env\hf_models\ に保存します
+echo       モデルは python\hf_models\ に保存します
 echo.
 
 if not exist "%HF_MODELS_DIR%" mkdir "%HF_MODELS_DIR%"

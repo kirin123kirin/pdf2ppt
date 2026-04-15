@@ -7,5 +7,5 @@ if not errorlevel 1 (
   exit /b %errorlevel%
 )
 
-set HF_HOME=%~dp0python_env\hf_models
-python_env\python.exe pdf2ppt.py %*
+set HF_HOME=%~dp0..\python\hf_models
+..\python\python.exe pdf2ppt.py %*
