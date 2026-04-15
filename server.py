@@ -11,6 +11,7 @@ server.py — pdf2ppt Web UI サーバー
 import gc
 import io
 import os
+import shutil
 import sys
 import uuid
 import tempfile
@@ -298,11 +299,12 @@ def convert():
 
         size_kb = round(pptx_path.stat().st_size / 1024)
         token   = str(uuid.uuid4())
-        _pptx_store[token] = pptx_path
+        _pptx_store[token] = (pptx_path, tmp_dir)
         return jsonify({'token': token, 'filename': pptx_path.name, 'size_kb': size_kb})
 
     except Exception as e:
         import traceback; traceback.print_exc()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         return jsonify({'error': str(e)}), 500
     finally:
         gc.collect()
@@ -324,8 +326,10 @@ def _load_image(data: bytes, suffix: str) -> "Image.Image | None":
             import tempfile as _tf, os as _os
             with _tf.NamedTemporaryFile(suffix='.svg', delete=False) as t:
                 t.write(data); t.flush(); svg_tmp = t.name
-            drawing = svg2rlg(svg_tmp)
-            _os.unlink(svg_tmp)
+            try:
+                drawing = svg2rlg(svg_tmp)
+            finally:
+                _os.unlink(svg_tmp)
             buf = io.BytesIO()
             renderPM.drawToFile(drawing, buf, fmt='PNG')
             buf.seek(0)
@@ -340,9 +344,20 @@ def _load_image(data: bytes, suffix: str) -> "Image.Image | None":
 
 @app.route('/download/<token>')
 def download(token):
-    path = _pptx_store.get(token)
-    if path is None or not path.exists():
+    from flask import after_this_request
+    entry = _pptx_store.pop(token, None)
+    if entry is None:
         return 'Not found', 404
+    path, tmp_dir = entry
+    if not path.exists():
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return 'Not found', 404
+
+    @after_this_request
+    def _cleanup(resp):
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return resp
+
     return send_file(str(path), as_attachment=True, download_name=path.name)
 
 

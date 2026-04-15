@@ -261,7 +261,7 @@ def extract_text(
             "page":       page_num + 1,
             "text":       text,
             "font_name":  "unknown",
-            "font_size":  round((y1 - y0) / dpi * 72, 1),
+            "font_size":  _snap_font_size((y1 - y0) / dpi * 72),
             "font_color": _hex(_text_color(arr, x0, y0, x1, y1)),
             "confidence": round(float(conf), 3) if conf is not None else None,
             "x0": round(x0/dpi*72, 2), "y0": round(y0/dpi*72, 2),
@@ -466,7 +466,7 @@ def extract_blocks(
 # STEP 4: PowerPoint 出力（ストリーミング）
 # ─────────────────────────────────────────────
 
-_FONT_SIZES = [6, 7, 8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20,
+_FONT_SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20,
                24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96]
 
 

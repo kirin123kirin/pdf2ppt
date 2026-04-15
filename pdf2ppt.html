@@ -455,8 +455,13 @@ async function initOcr() {
   }
 }
 
-/** Tesseract data.lines を textRows 形式に変換 */
-function tesseractToRows(lines, scale, imgDataArray, W, H, minConf = 60) {
+/**
+ * Tesseract data.lines を textRows 形式に変換
+ * ptFactor: (y_px / scale) をポイントに換算する係数
+ *   PDF モード: 1.0  (scale = px/pt なので y/scale = pt)
+ *   画像モード: 72/IMG_DPI  (scale=1 なので y_px がそのまま px → ×(72/96) でpt変換)
+ */
+function tesseractToRows(lines, scale, imgDataArray, W, H, minConf = 60, ptFactor = 1.0) {
   const rows = [];
   for (const line of lines) {
     const text = line.text.replace(/\n/g, '').trim();
@@ -472,7 +477,7 @@ function tesseractToRows(lines, scale, imgDataArray, W, H, minConf = 60) {
       y1_px: Math.min(H, y1_px),
       x0: x0_px / scale, y0: y0_px / scale,
       x1: x1_px / scale, y1: y1_px / scale,
-      font_size:  snapFontSize((y1_px - y0_px) / scale),
+      font_size:  snapFontSize((y1_px - y0_px) / scale * ptFactor),
       font_color: getTextColor(imgDataArray, x0_px, y0_px, x1_px, y1_px, W),
     });
   }
@@ -765,7 +770,7 @@ async function processImage(file) {
     log('  OCR 実行中 (Tesseract.js)...', 'info');
     try {
       const { data } = await ocrWorker.recognize(canvas);
-      textRows = tesseractToRows(data.lines, scale, origData.data, W, H);
+      textRows = tesseractToRows(data.lines, scale, origData.data, W, H, 60, 72 / IMG_DPI);
       log(`  OCR: ${textRows.length} 行認識`);
     } catch(e) {
       log(`  [WARN] OCR 認識失敗: ${e.message}`, 'warn');
@@ -809,7 +814,7 @@ async function processImage(file) {
       w: Math.max(row.x1 - row.x0, 1) / IMG_DPI,
       h: Math.max(row.y1 - row.y0, 1) / IMG_DPI,
       fontFace:    'メイリオ',
-      fontSize:    snapFontSize(row.font_size * 72 / IMG_DPI), // px→pt→標準サイズにスナップ
+      fontSize:    row.font_size,  // tesseractToRows で既にスナップ済み
       color:       row.font_color || '000000',
       wrap:        false,
       valign:      'top',
