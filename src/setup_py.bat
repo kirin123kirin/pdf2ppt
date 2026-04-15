@@ -86,10 +86,14 @@ set HF_HOME=%HF_MODELS_DIR%
 del "%PY_DIR%\_dl_models.py"
 
 echo.
+echo [6/6] pdf2ppt パッケージをインストール中...
+"%PY_EXE%" -m pip install --no-warn-script-location -e "%~dp0.."
+
+echo.
 echo ============================================================
 echo  セットアップ完了
 echo.
-echo  Web UI 起動:  start.bat
-echo  CLI 実行:     pdf2ppt.bat input.pdf
+echo  Web UI 起動:  python\Scripts\webpdf2ppt.exe
+echo  CLI 実行:     python\Scripts\pdf2ppt.exe input.pdf
 echo ============================================================
 pause

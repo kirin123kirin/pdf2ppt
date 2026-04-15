@@ -12,7 +12,6 @@ import gc
 import io
 import os
 import shutil
-import sys
 import uuid
 import tempfile
 import threading
@@ -22,9 +21,7 @@ from pathlib import Path
 from flask import Flask, request, jsonify, send_file, render_template_string
 from PIL import Image
 
-# ── pdf2ppt.py を同ディレクトリからインポート ─────────────────────────────
-sys.path.insert(0, str(Path(__file__).parent))
-import pdf2ppt
+from pdf2ppt import converter as pdf2ppt
 
 # ── surya モデルの事前ロード（サーバー起動直後にバックグラウンドで実行）────
 _det = None
@@ -361,12 +358,14 @@ def download(token):
     return send_file(str(path), as_attachment=True, download_name=path.name)
 
 
-# ── エントリーポイント ────────────────────────────────────────────────────
-
-if __name__ == '__main__':
+def main():
     port = 8765
     url  = f'http://127.0.0.1:{port}'
     print(f'[server] 起動: {url}')
     print('[server] 停止するには Ctrl+C を押してください')
     threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     app.run(host='127.0.0.1', port=port, debug=False, threaded=False)
+
+
+if __name__ == '__main__':
+    main()
