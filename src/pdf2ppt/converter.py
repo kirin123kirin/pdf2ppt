@@ -723,7 +723,16 @@ def process_image(
 # エントリーポイント
 # ─────────────────────────────────────────────
 
+def _set_hf_home():
+    """HF_HOME が未設定の場合、ポータブル環境のモデルディレクトリを使用する。"""
+    if "HF_HOME" not in os.environ:
+        portable = Path(__file__).parent.parent.parent / "python" / "hf_models"
+        if portable.exists():
+            os.environ["HF_HOME"] = str(portable)
+
+
 def main() -> None:
+    _set_hf_home()
     parser = argparse.ArgumentParser(
         description="PDF を PowerPoint に変換する (surya OCR使用)",
         formatter_class=argparse.RawDescriptionHelpFormatter,

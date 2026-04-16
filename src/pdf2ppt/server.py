@@ -40,8 +40,6 @@ def _preload_models():
         print(f"[server][WARN] モデルロード失敗: {e}")
     _model_ready.set()
 
-threading.Thread(target=_preload_models, daemon=True).start()
-
 # ── 生成 PPTX の一時保持 {token: Path} ──────────────────────────────────────
 _pptx_store: dict[str, Path] = {}
 
@@ -358,7 +356,17 @@ def download(token):
     return send_file(str(path), as_attachment=True, download_name=path.name)
 
 
+def _set_hf_home():
+    """HF_HOME が未設定の場合、ポータブル環境のモデルディレクトリを使用する。"""
+    if "HF_HOME" not in os.environ:
+        portable = Path(__file__).parent.parent.parent / "python" / "hf_models"
+        if portable.exists():
+            os.environ["HF_HOME"] = str(portable)
+
+
 def main():
+    _set_hf_home()
+    threading.Thread(target=_preload_models, daemon=True).start()
     port = 8765
     url  = f'http://127.0.0.1:{port}'
     print(f'[server] 起動: {url}')
