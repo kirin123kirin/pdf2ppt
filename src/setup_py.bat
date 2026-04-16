@@ -71,17 +71,20 @@ echo.
 
 if not exist "%HF_MODELS_DIR%" mkdir "%HF_MODELS_DIR%"
 
+set HF_HOME=%HF_MODELS_DIR%
 echo import os > "%PY_DIR%\_dl_models.py"
 echo os.environ["HF_HOME"] = r"%HF_MODELS_DIR%" >> "%PY_DIR%\_dl_models.py"
-echo print("  [1/2] Detection モデルをダウンロード中...") >> "%PY_DIR%\_dl_models.py"
+echo print("  [1/3] Foundation モデルをダウンロード中...") >> "%PY_DIR%\_dl_models.py"
+echo from surya.foundation import FoundationPredictor >> "%PY_DIR%\_dl_models.py"
+echo FoundationPredictor^(^) >> "%PY_DIR%\_dl_models.py"
+echo print("  [2/3] Detection モデルをダウンロード中...") >> "%PY_DIR%\_dl_models.py"
 echo from surya.detection import DetectionPredictor >> "%PY_DIR%\_dl_models.py"
 echo DetectionPredictor^(^) >> "%PY_DIR%\_dl_models.py"
-echo print("  [2/2] Recognition モデルをダウンロード中...") >> "%PY_DIR%\_dl_models.py"
+echo print("  [3/3] Recognition モデルをダウンロード中...") >> "%PY_DIR%\_dl_models.py"
 echo from surya.recognition import RecognitionPredictor >> "%PY_DIR%\_dl_models.py"
 echo RecognitionPredictor^(^) >> "%PY_DIR%\_dl_models.py"
 echo print("  surya モデルのダウンロード完了") >> "%PY_DIR%\_dl_models.py"
 
-set HF_HOME=%HF_MODELS_DIR%
 "%PY_EXE%" "%PY_DIR%\_dl_models.py"
 del "%PY_DIR%\_dl_models.py"
 
